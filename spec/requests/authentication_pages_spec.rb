@@ -1,4 +1,5 @@
 require 'spec_helper'
+require 'pp'
 
 describe "Authentication"  do 
 	subject { page }
@@ -8,6 +9,13 @@ describe "Authentication"  do
 
 		it { should have_content('Sign in')}
 		it { should have_title('Sign in')}
+		it { should have_link('Sign in'), 		href: signin_path }
+		it { should_not have_link('Settings') }
+		it { should_not have_link('Profile') }
+		it { should_not have_link('Users') }
+
+		it { should_not have_link('Sign out'),	href: signout_path}
+
 	end
 
 	describe "signin" do
@@ -27,14 +35,12 @@ describe "Authentication"  do
 
 		describe "with valid information" do
 			let(:user) { FactoryGirl.create(:user) }
-			before do
-				fill_in "Email",	with: user.email.upcase
-				fill_in "Password",	with: user.password
-				click_button "Sign in"
-			end
-
+			before { sign_in user }
+			
 			it {should have_title(user.name)}
+			it {should have_link('Users',		href: users_path)}
 			it {should have_link('Profile', 	href: user_path(user))}
+			it {should have_link('Settings'),	href: edit_user_path(user)}
 			it {should have_link('Sign out',	href: signout_path)}
 			it {should_not have_link('Sign in',	href: signin_path)}
 
@@ -45,6 +51,140 @@ describe "Authentication"  do
 		end
 	end
 
+	describe "authorization" do
+		describe "for non-signed-in users" do
+			let(:user) { FactoryGirl.create(:user)}
+
+			describe "when attempting to visit a protected page" do
+				before do
+					visit edit_user_path(user)
+					fill_in "Email",	with: user.email
+					fill_in "Password",	with: user.password
+					click_button "Sign in"
+				end
+
+				describe "after signing in" do
+
+					it "should render the desired protected page" do
+						expect(page).to have_title('Edit user')
+					end
+
+					describe "when signing in again" do
+						before do
+							click_link "Sign out"
+							visit signin_path
+							fill_in "Email",	with: user.email
+							fill_in "Password",	with: user.password
+							click_button "Sign in"
+						end
+
+						it "should render the default (profile) page" do
+							expect(page).to have_title(user.name)
+						end
+
+					end
+
+				end
+			end
+
+			describe "in the Users controller" do
+
+				describe "visiting the edit page" do
+					before  { visit edit_user_path(user)}
+					it { should have_title('Sign in')}
+				end
+
+				describe "submitting to the update action" do
+					before { patch user_path(user)}
+					specify { expect(response).to redirect_to(signin_path)}
+				end
+
+				describe "getting a valid users page" do
+					before { visit user_path(user)}
+					it { should have_title('Sign in')}
+				end
+
+				describe "getting an invalid users page" do
+					let(:found_user) { User.find_by(email: "cantfindme") }
+					# do a get for a non-existent user; need to find more elegant way to do this
+					before { get (users_path + "/5") }
+					#puts user.email
+					#before { get user_path(found_user) }
+					specify { expect(response).to redirect_to(signin_url) }
+					#it { should have_title('Sign in') }
+
+				end
+
+				describe "visiting the user index" do
+					before { visit users_path }
+					it { should have_title('Sign in')}
+				end
+
+			end
+
+		end
+
+		describe "as wrong user" do
+			let(:user) { FactoryGirl.create(:user)}
+			let(:wrong_user) { FactoryGirl.create(:user, email: "wrong@example.com")}
+			before { sign_in user, no_capybara: true }
+
+			describe "submitting a GET request to the Users#edit action" do
+				before { get edit_user_path(wrong_user)}
+				specify { expect(response.body).not_to match(full_title('Edit user'))}
+				specify { expect(response).to redirect_to(root_url)}
+			end
+
+			describe "submitting a PATCH request to the Users#update action" do
+				before { patch user_path(wrong_user) }
+				specify { expect(response).to redirect_to(root_url)}
+			end
+		end
+
+		describe "as non-admin user" do
+
+			let(:user) { FactoryGirl.create(:user)}
+			let(:non_admin) { FactoryGirl.create(:user)}
+
+			before { sign_in non_admin, no_capybara: true }
+
+			describe "submitting a DELETE request to the Users#destroy action" do
+				before {delete user_path(user)}
+				specify { expect(response).to redirect_to(root_url)}
+			end
+
+			describe "submitting a new request to the Users#new action" do
+				#before { visit signup_path }
+				before { get new_user_path }
+				#it { should have_content('Welcome to the Sample App')}
+
+				specify { expect(response).to redirect_to(root_url) }
+			end
+
+			describe "submitting a create request to the Users#create action" do
+				let (:params) do 
+					{ user: { admin: false, password: user.password, 
+							  password_confirmation: user.password } }
+				end
+
+				before { post users_path, params }
+				specify { expect(response).to redirect_to(root_url)}
+			end
+
+		end
+
+		describe "as an admin user" do
+			let(:admin) { FactoryGirl.create(:admin) }
+			before { sign_in admin, no_capybara: true }
+			
+			describe "attempting to delete myself" do
+				before { delete user_path(admin) }
+				specify { expect(response).to redirect_to(root_url) }
+			end
+		end
+
+
+	end
 end
 
 
